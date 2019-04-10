@@ -1,0 +1,17 @@
+arango-importer
+*~
+*.out
+*.zip
+*.orig
+.DS_Store
+dump.rdb
+#*#
+
+vendor
+vendor/*
+_vendor
+
+.idea/*
+
+.vscode
+.vscode/*

@@ -1,0 +1,6 @@
+type: database
+action: create
+name: canonical_debate
+allowed:
+  - username: ${username}
+    password: ${password}
