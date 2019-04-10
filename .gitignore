@@ -15,3 +15,5 @@ _vendor
 
 .vscode
 .vscode/*
+
+migrations/config
