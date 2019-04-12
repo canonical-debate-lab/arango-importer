@@ -14,29 +14,9 @@ func main() {
 
 	db, _ := OpenArangoConnection()
 
-	// Open "claims" collection
-	colClaims, err := db.Collection(nil, "claims")
-	if err != nil {
-		fmt.Println("Error opening claims collection:", err.Error())
-		panic(err.Error())
-	}
-	err = colClaims.Truncate(nil)
-	if err != nil {
-		fmt.Println("Error truncating Claims:", err.Error())
-		panic(err.Error())
-	}
-
-	// Open "arguments" collection
-	colArgs, err := db.Collection(nil, "arguments")
-	if err != nil {
-		fmt.Println("Error opening arguments collection:", err.Error())
-		panic(err.Error())
-	}
-	err = colArgs.Truncate(nil)
-	if err != nil {
-		fmt.Println("Error truncating Arguments:", err.Error())
-		panic(err.Error())
-	}
+	// Open collections for vertices
+	colClaims := openCollection(db, "claims", true)
+	colArgs := openCollection(db, "arguments", true)
 
 	filename := "data/Test1.json"
 	//filename := "data/small_test.json"
@@ -96,41 +76,10 @@ func main() {
 	}
 	data = append(data, mpClaims...)
 
-	// Open "inferences" edge collection
-	edgeInferences, err := db.Collection(nil, "inferences")
-	if err != nil {
-		fmt.Println("Error opening inferences edge collection:", err.Error())
-		panic(err.Error())
-	}
-	err = edgeInferences.Truncate(nil)
-	if err != nil {
-		fmt.Println("Error truncating Inferences:", err.Error())
-		panic(err.Error())
-	}
-
-	// Open "base_claims" edge collection
-	edgeBaseClaims, err := db.Collection(nil, "base_claims")
-	if err != nil {
-		fmt.Println("Error opening base_claims edge collection:", err.Error())
-		panic(err.Error())
-	}
-	err = edgeBaseClaims.Truncate(nil)
-	if err != nil {
-		fmt.Println("Error truncating BaseClaims:", err.Error())
-		panic(err.Error())
-	}
-
-	// Open "premises" edge collection
-	edgePremises, err := db.Collection(nil, "premises")
-	if err != nil {
-		fmt.Println("Error opening premises edge collection:", err.Error())
-		panic(err.Error())
-	}
-	err = edgePremises.Truncate(nil)
-	if err != nil {
-		fmt.Println("Error truncating Premises:", err.Error())
-		panic(err.Error())
-	}
+	// Open collections for edges
+	edgeInferences := openCollection(db, "inferences", true)
+	edgeBaseClaims := openCollection(db, "base_claims", true)
+	edgePremises := openCollection(db, "premises", true)
 
 	// Second pass: create edges
 	for _, node := range data {
@@ -266,4 +215,20 @@ func createBaseClaim(c driver.Collection, fromid, toid string) {
 		To:   toid,
 	}
 	createItem(c, bc)
+}
+
+func openCollection(db driver.Database, name string, truncate bool) driver.Collection {
+	col, err := db.Collection(nil, name)
+	if err != nil {
+		fmt.Printf("Error opening %s collection: %s\n", name, err.Error())
+		panic(err.Error())
+	}
+	if truncate {
+		err = col.Truncate(nil)
+		if err != nil {
+			fmt.Printf("Error truncating %s: %s", name, err.Error())
+			panic(err.Error())
+		}
+	}
+	return col
 }
