@@ -5,6 +5,11 @@ import (
 	"time"
 )
 
+const PREMISE_RULE_NONE int = 0
+const PREMISE_RULE_ALL int = 1
+const PREMISE_RULE_ANY int = 2
+const PREMISE_RULE_ANY_TWO int = 3
+
 type Claim struct {
 	ID            string    `json:"_key"`
 	CreatedAt     time.Time `json:"start"`
@@ -14,6 +19,7 @@ type Claim struct {
 	Question      string    `json:"question"`
 	Note          string    `json:"note"`
 	MultiPremise  bool      `json:"mp"`
+	PremiseRule   int       `json:"mprule"`
 	ChildrenOrder []string  `json:"childOrder"`
 }
 
@@ -31,6 +37,20 @@ func NewClaim(node DebateMapNode) Claim {
 		Question:      node.Current.Title.Question,
 		Note:          node.Note,
 		MultiPremise:  node.MultiPremise,
+		PremiseRule:   argumentTypeToPremiseRule(node.Current.ArgumentType),
 		ChildrenOrder: node.ChildrenOrder,
+	}
+}
+
+func argumentTypeToPremiseRule(argumentType int) int {
+	switch argumentType {
+	case ARGUMENT_TYPE_ANY:
+		return PREMISE_RULE_ANY
+	case ARGUMENT_TYPE_ANY_TWO:
+		return PREMISE_RULE_ANY_TWO
+	case ARGUMENT_TYPE_ALL:
+		return PREMISE_RULE_ALL
+	default:
+		return PREMISE_RULE_NONE
 	}
 }

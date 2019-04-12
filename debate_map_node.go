@@ -75,8 +75,8 @@ func NewChildFromData(data interface{}) *Child {
 	if m, ok := data.(map[string]interface{}); ok {
 		if id, okay := m["_key"].(string); okay {
 			child := Child{ID: id}
-			if polarity, kk := m["polarity"].(int); kk {
-				child.Polarity = polarity
+			if polarity, kk := m["polarity"].(float64); kk {
+				child.Polarity = int(polarity)
 			}
 			return &child
 		}

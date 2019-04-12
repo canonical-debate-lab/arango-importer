@@ -29,6 +29,5 @@ func NewArgument(node DebateMapNode) Argument {
 		Negation:  node.Current.Title.Negation,
 		Question:  node.Current.Title.Question,
 		Note:      node.Note,
-		Pro:       node.IsPro(),
 	}
 }
