@@ -51,6 +51,50 @@ func (node DebateMapNode) IsPro() bool {
 	return node.Polarity == ARGUMENT_POLARITY_PRO
 }
 
+// Creates a new MP Claim node,
+// And changes current node to point to it as its base claim
+func (node DebateMapNode) ConvertToMPClaim() (newArg, newClaim DebateMapNode) {
+	argChildren := map[string]interface{}{}
+	claimChildren := map[string]interface{}{}
+	for _, childInt := range node.Children {
+		if child := NewChildFromData(childInt); child != nil {
+			if child.Polarity > 0 {
+				argChildren[child.ID] = *child
+			} else {
+				claimChildren[child.ID] = *child
+			}
+		}
+	}
+
+	newArg = DebateMapNode{
+		ID:           node.ID,
+		CreatedAt:    node.CreatedAt,
+		Creator:      node.Creator,
+		Type:         NODE_TYPE_ARGUMENT,
+		Polarity:     node.Polarity,
+		MultiPremise: false,
+		Parents:      node.Parents,
+		Children:     argChildren,
+	}
+
+	newClaim = DebateMapNode{
+		ID:            fmt.Sprintf("ldkfasd%s", node.ID), // TODO - generate UUID and base64 it
+		CreatedAt:     node.CreatedAt,
+		Creator:       node.Creator,
+		Type:          NODE_TYPE_CLAIM,
+		Current:       node.Current,
+		Note:          node.Note,
+		Parents:       map[string]interface{}{newArg.ID: newArg},
+		Children:      claimChildren,
+		MultiPremise:  true,
+		ChildrenOrder: node.ChildrenOrder,
+	}
+
+	newArg.Children[newClaim.ID] = Child{ID: newClaim.ID}
+
+	return
+}
+
 type Current struct {
 	Title        TitleSet `json:"titles"`
 	ArgumentType int      `json:"argumentType"`
@@ -80,7 +124,10 @@ func NewChildFromData(data interface{}) *Child {
 			}
 			return &child
 		}
+	} else if ch, ok := data.(Child); ok {
+		return &ch
 	}
+
 	return nil
 }
 

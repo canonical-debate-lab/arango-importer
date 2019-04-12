@@ -59,7 +59,9 @@ func main() {
 	// First pass: create Claims and Arguments
 	claims := make(map[string]Claim)
 	args := make(map[string]Argument)
-	for _, node := range data {
+	mpClaims := []DebateMapNode{}
+	idxs := []int{}
+	for i, node := range data {
 		fmt.Printf("Read node: +%v\n", node)
 		switch node.Type {
 		case NODE_TYPE_CLAIM:
@@ -67,11 +69,32 @@ func main() {
 			claims[claim.ID] = claim
 			createItem(colClaims, claim)
 		case NODE_TYPE_ARGUMENT:
-			argument := NewArgument(node)
-			args[argument.ID] = argument
-			createItem(colArgs, argument)
+			if node.MultiPremise {
+				// In Debate Map, it's the Arguments that are MP
+				// In this graph, it will be an MP Claim instead, which needs to be created
+
+				// Replace the new node with claim and arg nodes
+				argNode, claimNode := node.ConvertToMPClaim()
+				data[i] = argNode
+				mpClaims = append(mpClaims, claimNode)
+
+				idxs = append(idxs, i)
+
+				claim := NewClaim(claimNode)
+				claims[claim.ID] = claim
+				createItem(colClaims, claim)
+
+				argument := NewArgument(argNode)
+				args[argument.ID] = argument
+				createItem(colArgs, argument)
+			} else {
+				argument := NewArgument(node)
+				args[argument.ID] = argument
+				createItem(colArgs, argument)
+			}
 		}
 	}
+	data = append(data, mpClaims...)
 
 	// Open "inferences" edge collection
 	edgeInferences, err := db.Collection(nil, "inferences")
