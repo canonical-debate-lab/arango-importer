@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"time"
 )
 
@@ -32,23 +31,21 @@ type DebateMapNode struct {
 	ChildrenOrder []string               `json:"childrenOrder"`
 }
 
-func (node DebateMapNode) ArangoID() string {
-	var collection string
-	switch node.Type {
-	case NODE_TYPE_CLAIM:
-		collection = "claims/"
-	case NODE_TYPE_ARGUMENT:
-		collection = "arguments/"
-	}
-	return fmt.Sprintf("%s%s", collection, node.ID)
-}
-
 func (node DebateMapNode) CreatedTime() time.Time {
 	return time.Unix(0, node.CreatedAt*1000000)
 }
 
 func (node DebateMapNode) IsPro() bool {
 	return node.Polarity == ARGUMENT_POLARITY_PRO
+}
+
+func (node DebateMapNode) ChildOrder(childId string) int {
+	for i, id := range node.ChildrenOrder {
+		if childId == id {
+			return i + 1
+		}
+	}
+	return 0
 }
 
 // Creates a new MP Claim node,
@@ -78,7 +75,7 @@ func (node DebateMapNode) ConvertToMPClaim() (newArg, newClaim DebateMapNode) {
 	}
 
 	newClaim = DebateMapNode{
-		ID:            fmt.Sprintf("ldkfasd%s", node.ID), // TODO - generate UUID and base64 it
+		ID:            node.ID,
 		CreatedAt:     node.CreatedAt,
 		Creator:       node.Creator,
 		Type:          NODE_TYPE_CLAIM,

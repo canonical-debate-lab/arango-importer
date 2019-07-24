@@ -4,10 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"os"
 
 	driver "github.com/arangodb/go-driver"
 	"github.com/arangodb/go-driver/http"
+	"github.com/google/uuid"
 )
+
+const DEFAULT_DB = "canonical_debate"
 
 func main() {
 	fmt.Println("Starting data migration")
@@ -86,12 +90,16 @@ func main() {
 		fmt.Printf("Read item for edges: +%v\n", node)
 		switch node.Type {
 		case NODE_TYPE_CLAIM:
+			nodeClaim, ok := claims[node.ID]
+			if !ok {
+				panic(fmt.Sprintf("Node claim %s not found", node.ID))
+			}
 			if node.MultiPremise {
 				for _, childVal := range node.Children {
 					child := NewChildFromData(childVal)
 					if child != nil {
 						if claim, ok := claims[child.ID]; ok {
-							createPremise(edgePremises, node.ArangoID(), claim.ArangoID())
+							createPremise(edgePremises, nodeClaim.ArangoID(), claim, node.ChildOrder(child.ID))
 						} else {
 							panic(fmt.Sprintf("Child Premise %s not found", child.ID))
 						}
@@ -101,22 +109,27 @@ func main() {
 				for _, childVal := range node.Children {
 					child := NewChildFromData(childVal)
 					if child != nil {
+						id := nodeClaim.ArangoID()
 						if arg, ok := args[child.ID]; ok {
+							arg.TargetClaimID = &id
 							arg.Pro = child.IsPro()
-							updateItem(colArgs, arg.ID, arg)
-							createInference(edgeInferences, node.ArangoID(), arg.ArangoID())
+							updateItem(colArgs, arg.Key, arg)
+							createInference(edgeInferences, nodeClaim.ArangoID(), arg)
 						} else if claim, ok := claims[child.ID]; ok {
 							// Data consistency problem in the Debate Map version!
 							// Create an intervening Argument to resolve the problem
 							arg := Argument{
-								ID:        fmt.Sprintf("ldkfasf%s", child.ID), // TODO - generate UUID and base64 it
-								CreatedAt: claim.CreatedAt,
-								Creator:   claim.Creator,
-								Pro:       child.IsPro(),
+								Key:           uuid.New().String(),
+								ID:            child.ID,
+								TargetClaimID: &id,
+								ClaimID:       claim.ArangoID(),
+								CreatedAt:     claim.CreatedAt,
+								Creator:       claim.Creator,
+								Pro:           child.IsPro(),
 							}
 							createItem(colArgs, arg)
-							createInference(edgeInferences, node.ArangoID(), arg.ArangoID())
-							createBaseClaim(edgeBaseClaims, arg.ArangoID(), claim.ArangoID())
+							createInference(edgeInferences, nodeClaim.ArangoID(), arg)
+							createBaseClaim(edgeBaseClaims, arg, claim.ArangoID())
 						} else {
 							panic(fmt.Sprintf("Child Argument %s not found", child.ID))
 						}
@@ -124,15 +137,23 @@ func main() {
 				}
 			}
 		case NODE_TYPE_ARGUMENT:
+			nodeArg, ok := args[node.ID]
+			if !ok {
+				panic(fmt.Sprintf("Node argument %s not found", node.ID))
+			}
 			for _, childVal := range node.Children {
 				child := NewChildFromData(childVal)
 				if child != nil {
+					id := nodeArg.ArangoID()
 					if arg, ok := args[child.ID]; ok {
+						arg.TargetArgumentID = &id
 						arg.Pro = child.IsPro()
-						updateItem(colArgs, arg.ID, arg)
-						createInference(edgeInferences, node.ArangoID(), arg.ArangoID())
+						updateItem(colArgs, arg.Key, arg)
+						createInference(edgeInferences, nodeArg.ArangoID(), arg)
 					} else if claim, ok := claims[child.ID]; ok {
-						createBaseClaim(edgeBaseClaims, node.ArangoID(), claim.ArangoID())
+						arg.ClaimID = claim.ArangoID()
+						updateItem(colArgs, nodeArg.Key, arg)
+						createBaseClaim(edgeBaseClaims, nodeArg, claim.ArangoID())
 					} else {
 						panic(fmt.Sprintf("Child %s not found", child.ID))
 					}
@@ -166,7 +187,11 @@ func OpenArangoConnection() (driver.Database, error) {
 		panic(err.Error())
 	}
 
-	db, err := c.Database(nil, "canonical_debate")
+	dbname := DEFAULT_DB
+	if len(os.Args) > 1 {
+		dbname = os.Args[1]
+	}
+	db, err := c.Database(nil, dbname)
 	if err != nil {
 		fmt.Println("Error choosing the database:", err.Error())
 		panic(err.Error())
@@ -184,8 +209,8 @@ func createItem(c driver.Collection, item interface{}) {
 	fmt.Println("Created item. Meta:", meta)
 }
 
-func updateItem(c driver.Collection, id string, item interface{}) {
-	meta, err := c.UpdateDocument(nil, id, item)
+func updateItem(c driver.Collection, key string, item interface{}) {
+	meta, err := c.UpdateDocument(nil, key, item)
 	if err != nil {
 		fmt.Printf("Error updating item: %s\nItem: %+v\n", err.Error(), item)
 		panic(err.Error())
@@ -193,26 +218,36 @@ func updateItem(c driver.Collection, id string, item interface{}) {
 	fmt.Println("Updated item. Meta:", meta)
 }
 
-func createInference(c driver.Collection, fromid, toid string) {
+func createInference(c driver.Collection, fromid string, toArg Argument) {
 	inference := Inference{
-		From: fromid,
-		To:   toid,
+		Key:       uuid.New().String(),
+		CreatedAt: toArg.CreatedAt,
+		Creator:   toArg.Creator,
+		From:      fromid,
+		To:        toArg.ArangoID(),
 	}
 	createItem(c, inference)
 }
 
-func createPremise(c driver.Collection, fromid, toid string) {
+func createPremise(c driver.Collection, fromid string, toClaim Claim, order int) {
 	premise := Premise{
-		From: fromid,
-		To:   toid,
+		Key:       uuid.New().String(),
+		CreatedAt: toClaim.CreatedAt,
+		Creator:   toClaim.Creator,
+		From:      fromid,
+		To:        toClaim.ArangoID(),
+		Order:     order,
 	}
 	createItem(c, premise)
 }
 
-func createBaseClaim(c driver.Collection, fromid, toid string) {
+func createBaseClaim(c driver.Collection, fromArg Argument, toid string) {
 	bc := BaseClaim{
-		From: fromid,
-		To:   toid,
+		Key:       uuid.New().String(),
+		CreatedAt: fromArg.CreatedAt,
+		Creator:   fromArg.Creator,
+		From:      fromArg.ArangoID(),
+		To:        toid,
 	}
 	createItem(c, bc)
 }
