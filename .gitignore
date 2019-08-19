@@ -18,3 +18,4 @@ _vendor
 .vscode/*
 
 migrations/config
+migrations/config.prod

@@ -2,6 +2,8 @@ package main
 
 import (
 	"time"
+
+	"github.com/google/uuid"
 )
 
 const NODE_TYPE_CATEGORY int = 10
@@ -75,7 +77,7 @@ func (node DebateMapNode) ConvertToMPClaim() (newArg, newClaim DebateMapNode) {
 	}
 
 	newClaim = DebateMapNode{
-		ID:            node.ID,
+		ID:            uuid.New().String(),
 		CreatedAt:     node.CreatedAt,
 		Creator:       node.Creator,
 		Type:          NODE_TYPE_CLAIM,

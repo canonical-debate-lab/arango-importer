@@ -5,18 +5,41 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"strings"
 
 	driver "github.com/arangodb/go-driver"
 	"github.com/arangodb/go-driver/http"
 	"github.com/google/uuid"
 )
 
+const DEFAULT_SERVER = "http://localhost:8529"
 const DEFAULT_DB = "canonical_debate"
+const DEFAULT_USERNAME = "root"
+const DEFAULT_PASSWORD = ""
 
 func main() {
 	fmt.Println("Starting data migration")
 
-	db, _ := OpenArangoConnection()
+	server := DEFAULT_SERVER
+	dbname := DEFAULT_DB
+	username := DEFAULT_USERNAME
+	password := DEFAULT_PASSWORD
+
+	for i, val := range os.Args {
+		if i > 0 {
+			if strings.HasPrefix(val, "http") {
+				server = val
+			} else if i == 3 {
+				username = val
+			} else if i == 4 {
+				password = val
+			} else {
+				dbname = val
+			}
+		}
+	}
+
+	db, _ := OpenArangoConnection(server, dbname, username, password)
 
 	// Open collections for vertices
 	colClaims := openCollection(db, "claims", true)
@@ -46,7 +69,7 @@ func main() {
 	mpClaims := []DebateMapNode{}
 	idxs := []int{}
 	for i, node := range data {
-		fmt.Printf("Read node: +%v\n", node)
+		fmt.Printf("Read node: %+v\n", node)
 		switch node.Type {
 		case NODE_TYPE_CLAIM:
 			claim := NewClaim(node)
@@ -69,6 +92,7 @@ func main() {
 				createItem(colClaims, claim)
 
 				argument := NewArgument(argNode)
+				argument.ClaimID = claim.ID
 				args[argument.ID] = argument
 				createItem(colArgs, argument)
 			} else {
@@ -87,7 +111,7 @@ func main() {
 
 	// Second pass: create edges
 	for _, node := range data {
-		fmt.Printf("Read item for edges: +%v\n", node)
+		fmt.Printf("Read item for edges: %+v\n", node)
 		switch node.Type {
 		case NODE_TYPE_CLAIM:
 			nodeClaim, ok := claims[node.ID]
@@ -109,11 +133,12 @@ func main() {
 				for _, childVal := range node.Children {
 					child := NewChildFromData(childVal)
 					if child != nil {
-						id := nodeClaim.ArangoID()
+						id := nodeClaim.ID
 						if arg, ok := args[child.ID]; ok {
 							arg.TargetClaimID = &id
 							arg.Pro = child.IsPro()
 							updateItem(colArgs, arg.Key, arg)
+							args[child.ID] = arg
 							createInference(edgeInferences, nodeClaim.ArangoID(), arg)
 						} else if claim, ok := claims[child.ID]; ok {
 							// Data consistency problem in the Debate Map version!
@@ -122,7 +147,7 @@ func main() {
 								Key:           uuid.New().String(),
 								ID:            child.ID,
 								TargetClaimID: &id,
-								ClaimID:       claim.ArangoID(),
+								ClaimID:       claim.ID,
 								CreatedAt:     claim.CreatedAt,
 								Creator:       claim.Creator,
 								Pro:           child.IsPro(),
@@ -144,15 +169,17 @@ func main() {
 			for _, childVal := range node.Children {
 				child := NewChildFromData(childVal)
 				if child != nil {
-					id := nodeArg.ArangoID()
+					id := nodeArg.ID
 					if arg, ok := args[child.ID]; ok {
 						arg.TargetArgumentID = &id
 						arg.Pro = child.IsPro()
 						updateItem(colArgs, arg.Key, arg)
+						args[child.ID] = arg
 						createInference(edgeInferences, nodeArg.ArangoID(), arg)
 					} else if claim, ok := claims[child.ID]; ok {
-						arg.ClaimID = claim.ArangoID()
-						updateItem(colArgs, nodeArg.Key, arg)
+						nodeArg.ClaimID = claim.ID
+						updateItem(colArgs, nodeArg.Key, nodeArg)
+						args[node.ID] = nodeArg
 						createBaseClaim(edgeBaseClaims, nodeArg, claim.ArangoID())
 					} else {
 						panic(fmt.Sprintf("Child %s not found", child.ID))
@@ -165,16 +192,16 @@ func main() {
 	fmt.Println("Done.")
 }
 
-func OpenArangoConnection() (driver.Database, error) {
-	fmt.Println("Connecting to the database")
+func OpenArangoConnection(server, dbname, username, password string) (driver.Database, error) {
 	conn, err := http.NewConnection(http.ConnectionConfig{
-		Endpoints: []string{"http://localhost:8529"},
+		Endpoints: []string{server},
 	})
+	fmt.Println("Connecting to the database:", server)
 	if err != nil {
 		fmt.Println("Error connecting the the database:", err.Error())
 		panic(err.Error())
 	}
-	conn, err = conn.SetAuthentication(driver.BasicAuthentication("root", ""))
+	conn, err = conn.SetAuthentication(driver.BasicAuthentication(username, password))
 	if err != nil {
 		fmt.Println("Error setting the connection authentication:", err.Error())
 		panic(err.Error())
@@ -187,10 +214,7 @@ func OpenArangoConnection() (driver.Database, error) {
 		panic(err.Error())
 	}
 
-	dbname := DEFAULT_DB
-	if len(os.Args) > 1 {
-		dbname = os.Args[1]
-	}
+	fmt.Println("Choosing the database:", dbname)
 	db, err := c.Database(nil, dbname)
 	if err != nil {
 		fmt.Println("Error choosing the database:", err.Error())
