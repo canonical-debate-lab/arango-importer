@@ -20,6 +20,8 @@ type Argument struct {
 	Question         string    `json:"question"`
 	Note             string    `json:"note"`
 	Pro              bool      `json:"pro"`
+	Relevance        float32   `json:"relevance"`
+	Str              float32   `json:"strength"`
 }
 
 func (arg Argument) ArangoID() string {
@@ -36,5 +38,7 @@ func NewArgument(node DebateMapNode) Argument {
 		Negation:  node.Current.Title.Negation,
 		Question:  node.Current.Title.Question,
 		Note:      node.Note,
+		Relevance: 1.00,
+		Str:       0.50,
 	}
 }

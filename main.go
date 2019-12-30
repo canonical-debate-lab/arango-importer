@@ -2,9 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io/ioutil"
-	"os"
 	"strings"
 
 	driver "github.com/arangodb/go-driver"
@@ -12,32 +12,29 @@ import (
 	"github.com/google/uuid"
 )
 
+const DEFAULT_FILENAME = "data/Test1.json"
 const DEFAULT_SERVER = "http://localhost:8529"
 const DEFAULT_DB = "canonical_debate"
 const DEFAULT_USERNAME = "root"
 const DEFAULT_PASSWORD = ""
 
+const FORMAT_UNKNOWN int = 0
+const FORMAT_NODES int = 1
+const FORMAT_GENERAL int = 2
+
 func main() {
 	fmt.Println("Starting data migration")
 
-	server := DEFAULT_SERVER
-	dbname := DEFAULT_DB
-	username := DEFAULT_USERNAME
-	password := DEFAULT_PASSWORD
-
-	for i, val := range os.Args {
-		if i > 0 {
-			if strings.HasPrefix(val, "http") {
-				server = val
-			} else if i == 3 {
-				username = val
-			} else if i == 4 {
-				password = val
-			} else {
-				dbname = val
-			}
-		}
-	}
+	var filename, server, dbname, username, password string
+	flag.StringVar(&filename, "f", DEFAULT_FILENAME, "filename")
+	flag.StringVar(&server, "h", DEFAULT_SERVER, "host (e.g. http://localhost:8529)")
+	flag.StringVar(&dbname, "db", DEFAULT_DB, "DB name")
+	flag.StringVar(&username, "u", DEFAULT_USERNAME, "username")
+	flag.StringVar(&password, "p", DEFAULT_PASSWORD, "password")
+	//filename := "data/Test1.json"
+	//filename := "data/small_test.json"
+	//filename := "data/single_test.json"
+	flag.Parse()
 
 	db, _ := OpenArangoConnection(server, dbname, username, password)
 
@@ -45,9 +42,6 @@ func main() {
 	colClaims := openCollection(db, "claims", true)
 	colArgs := openCollection(db, "arguments", true)
 
-	filename := "data/Test1.json"
-	//filename := "data/small_test.json"
-	//filename := "data/single_test.json"
 	fmt.Println("Loading file:", filename)
 	file, err := ioutil.ReadFile(filename)
 	if err != nil {
@@ -55,20 +49,67 @@ func main() {
 		panic(err.Error())
 	}
 
+	var format int
+	if strings.HasPrefix(string(file), `[{"children":{`) {
+		format = FORMAT_NODES
+	} else if strings.HasPrefix(string(file), `{"general":`) {
+		format = FORMAT_GENERAL
+	} else {
+		format = FORMAT_UNKNOWN
+	}
+
+	/*
+		m := map[string]interface{}{}
+		json.Unmarshal(file, &m)
+
+		for k, _ := range m {
+			fmt.Printf("Root key: %+v\n", k)
+		}
+
+		data := m["maps"].([]interface{})
+		for _, node := range data {
+			mnode := node.(map[string]interface{})
+			//delete(mnode, "_key")
+			fmt.Printf("Read mnode: %+v\n", mnode)
+		}
+	*/
+
 	// Convert the JSON to nodes
 	data := []DebateMapNode{}
-	err = json.Unmarshal([]byte(file), &data)
-	if err != nil {
-		fmt.Println("Error parsing JSON:", err.Error())
-		panic(err.Error())
+	revisions := map[string]NodeRevision{}
+	maps := map[string]DebateMapMap{}
+	if format == FORMAT_GENERAL {
+		general := DebateMapRoot{}
+		err = json.Unmarshal(file, &general)
+		if err != nil {
+			fmt.Println("Error parsing JSON:", err.Error())
+			panic(err.Error())
+		}
+		data = general.Nodes
+		revs := general.NodeRevisions
+		for _, rev := range revs {
+			revisions[rev.ID] = rev
+		}
+		for _, dmm := range general.Maps {
+			maps[dmm.RootNode] = dmm
+		}
+	} else {
+		err = json.Unmarshal(file, &data)
+		if err != nil {
+			fmt.Println("Error parsing JSON:", err.Error())
+			panic(err.Error())
+		}
 	}
 
 	// First pass: create Claims and Arguments
 	claims := make(map[string]Claim)
 	args := make(map[string]Argument)
-	mpClaims := []DebateMapNode{}
-	idxs := []int{}
+	newClaims := []DebateMapNode{}
 	for i, node := range data {
+		if format == FORMAT_GENERAL {
+			rev := revisions[node.CurrentRevision]
+			node.Current.Title = rev.Title
+		}
 		fmt.Printf("Read node: %+v\n", node)
 		switch node.Type {
 		case NODE_TYPE_CLAIM:
@@ -83,9 +124,7 @@ func main() {
 				// Replace the new node with claim and arg nodes
 				argNode, claimNode := node.ConvertToMPClaim()
 				data[i] = argNode
-				mpClaims = append(mpClaims, claimNode)
-
-				idxs = append(idxs, i)
+				newClaims = append(newClaims, claimNode)
 
 				claim := NewClaim(claimNode)
 				claims[claim.ID] = claim
@@ -100,9 +139,33 @@ func main() {
 				args[argument.ID] = argument
 				createItem(colArgs, argument)
 			}
+		case NODE_TYPE_CATEGORY, NODE_TYPE_PACKAGE, NODE_TYPE_QUESTION:
+			// Just to capture node information, these "debate" placeholders will be converted into
+			// a claim and (if there's a parent node) an argument
+			// They will require manual curation later to make them match the CD concepts
+			if dmm, ok := maps[node.ID]; ok {
+				node.Current.Title.Base = dmm.Name
+			}
+			argNode, claimNode := node.ConvertToClaimAndArg()
+
+			data[i] = claimNode
+
+			claim := NewClaim(claimNode)
+			claims[claim.ID] = claim
+			createItem(colClaims, claim)
+
+			if argNode != nil {
+				data[i] = *argNode
+				newClaims = append(newClaims, claimNode)
+
+				argument := NewArgument(*argNode)
+				argument.ClaimID = claim.ID
+				args[argument.ID] = argument
+				createItem(colArgs, argument)
+			}
 		}
 	}
-	data = append(data, mpClaims...)
+	data = append(data, newClaims...)
 
 	// Open collections for edges
 	edgeInferences := openCollection(db, "inferences", true)
@@ -119,19 +182,27 @@ func main() {
 				panic(fmt.Sprintf("Node claim %s not found", node.ID))
 			}
 			if node.MultiPremise {
-				for _, childVal := range node.Children {
-					child := NewChildFromData(childVal)
+				if len(node.Children) == 0 {
+					fmt.Println("----------------------------MPClaim has no children")
+				}
+				for key, childVal := range node.Children {
+					child := NewChildFromData(key, childVal)
 					if child != nil {
 						if claim, ok := claims[child.ID]; ok {
 							createPremise(edgePremises, nodeClaim.ArangoID(), claim, node.ChildOrder(child.ID))
 						} else {
 							panic(fmt.Sprintf("Child Premise %s not found", child.ID))
 						}
+					} else {
+						fmt.Println("----------------------------Premise child from data is nil")
 					}
 				}
 			} else {
-				for _, childVal := range node.Children {
-					child := NewChildFromData(childVal)
+				if len(node.Children) == 0 {
+					fmt.Println("----------------------------Claim has no children")
+				}
+				for key, childVal := range node.Children {
+					child := NewChildFromData(key, childVal)
 					if child != nil {
 						id := nodeClaim.ID
 						if arg, ok := args[child.ID]; ok {
@@ -151,6 +222,8 @@ func main() {
 								CreatedAt:     claim.CreatedAt,
 								Creator:       claim.Creator,
 								Pro:           child.IsPro(),
+								Relevance:     1.00,
+								Str:           0.50,
 							}
 							createItem(colArgs, arg)
 							createInference(edgeInferences, nodeClaim.ArangoID(), arg)
@@ -158,6 +231,8 @@ func main() {
 						} else {
 							panic(fmt.Sprintf("Child Argument %s not found", child.ID))
 						}
+					} else {
+						fmt.Println("----------------------------Claim child from data is nil")
 					}
 				}
 			}
@@ -166,8 +241,11 @@ func main() {
 			if !ok {
 				panic(fmt.Sprintf("Node argument %s not found", node.ID))
 			}
-			for _, childVal := range node.Children {
-				child := NewChildFromData(childVal)
+			if len(node.Children) == 0 {
+				fmt.Println("----------------------------Argument has no children")
+			}
+			for key, childVal := range node.Children {
+				child := NewChildFromData(key, childVal)
 				if child != nil {
 					id := nodeArg.ID
 					if arg, ok := args[child.ID]; ok {
@@ -184,6 +262,8 @@ func main() {
 					} else {
 						panic(fmt.Sprintf("Child %s not found", child.ID))
 					}
+				} else {
+					fmt.Println("----------------------------Argument child from data is nil")
 				}
 			}
 		}

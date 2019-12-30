@@ -19,18 +19,34 @@ const ARGUMENT_TYPE_ANY int = 10
 const ARGUMENT_TYPE_ANY_TWO int = 15
 const ARGUMENT_TYPE_ALL int = 20
 
+type DebateMapRoot struct {
+	Maps          []DebateMapMap  `json:"maps"`
+	Nodes         []DebateMapNode `json:"nodes"`
+	NodeRevisions []NodeRevision  `json:"nodeRevisions"`
+}
+
 type DebateMapNode struct {
-	ID            string                 `json:"_key"`
-	CreatedAt     int64                  `json:"createdAt"`
-	Creator       string                 `json:"creator"`
-	Type          int                    `json:"type"`
-	Current       Current                `json:"current"`
-	Note          string                 `json:"note"`
-	Polarity      int                    `json:"polarity"`
-	MultiPremise  bool                   `json:"multiPremiseArgument"`
-	Parents       map[string]interface{} `json:"parents"`
-	Children      map[string]interface{} `json:"children"`
-	ChildrenOrder []string               `json:"childrenOrder"`
+	ID              string                 `json:"_key"`
+	CreatedAt       int64                  `json:"createdAt"`
+	Creator         string                 `json:"creator"`
+	Type            int                    `json:"type"`
+	CurrentRevision string                 `json:"currentRevision"`
+	Current         Current                `json:"current"`
+	Note            string                 `json:"note"`
+	Polarity        int                    `json:"polarity"`
+	MultiPremise    bool                   `json:"multiPremiseArgument"`
+	Parents         map[string]interface{} `json:"parents"`
+	Children        map[string]interface{} `json:"children"`
+	ChildrenOrder   []string               `json:"childrenOrder"`
+}
+
+type DebateMapMap struct {
+	ID        string `json:"_key"`
+	CreatedAt int64  `json:"createdAt"`
+	Creator   string `json:"creator"`
+	Type      int    `json:"type"`
+	Name      string `json:"name"`
+	RootNode  string `json:"rootNode"`
 }
 
 func (node DebateMapNode) CreatedTime() time.Time {
@@ -55,8 +71,8 @@ func (node DebateMapNode) ChildOrder(childId string) int {
 func (node DebateMapNode) ConvertToMPClaim() (newArg, newClaim DebateMapNode) {
 	argChildren := map[string]interface{}{}
 	claimChildren := map[string]interface{}{}
-	for _, childInt := range node.Children {
-		if child := NewChildFromData(childInt); child != nil {
+	for key, childInt := range node.Children {
+		if child := NewChildFromData(key, childInt); child != nil {
 			if child.Polarity > 0 {
 				argChildren[child.ID] = *child
 			} else {
@@ -94,9 +110,49 @@ func (node DebateMapNode) ConvertToMPClaim() (newArg, newClaim DebateMapNode) {
 	return
 }
 
+// Converts one of the other node types to a Claim and an Argument to preserve the structure in the CD
+// If the node is a root node, then the "argument" will be nil
+func (node DebateMapNode) ConvertToClaimAndArg() (newArg *DebateMapNode, newClaim DebateMapNode) {
+	newClaim = DebateMapNode{
+		ID:            uuid.New().String(),
+		CreatedAt:     node.CreatedAt,
+		Creator:       node.Creator,
+		Type:          NODE_TYPE_CLAIM,
+		Current:       node.Current,
+		Note:          node.Note,
+		Parents:       node.Parents,
+		Children:      node.Children,
+		MultiPremise:  false,
+		ChildrenOrder: node.ChildrenOrder,
+	}
+
+	if len(node.Parents) > 0 {
+		newArg = &DebateMapNode{
+			ID:           node.ID,
+			CreatedAt:    node.CreatedAt,
+			Creator:      node.Creator,
+			Type:         NODE_TYPE_ARGUMENT,
+			Polarity:     ARGUMENT_POLARITY_PRO,
+			MultiPremise: false,
+			Parents:      node.Parents,
+			Children:     map[string]interface{}{},
+		}
+
+		newClaim.Parents = map[string]interface{}{newArg.ID: newArg}
+		newArg.Children[newClaim.ID] = Child{ID: newClaim.ID}
+	}
+
+	return
+}
+
 type Current struct {
 	Title        TitleSet `json:"titles"`
 	ArgumentType int      `json:"argumentType"`
+}
+
+type NodeRevision struct {
+	ID    string   `json:"_key"`
+	Title TitleSet `json:"titles"`
 }
 
 type TitleSet struct {
@@ -114,15 +170,13 @@ func (child Child) IsPro() bool {
 	return child.Polarity == ARGUMENT_POLARITY_PRO
 }
 
-func NewChildFromData(data interface{}) *Child {
+func NewChildFromData(key string, data interface{}) *Child {
 	if m, ok := data.(map[string]interface{}); ok {
-		if id, okay := m["_key"].(string); okay {
-			child := Child{ID: id}
-			if polarity, kk := m["polarity"].(float64); kk {
-				child.Polarity = int(polarity)
-			}
-			return &child
+		child := Child{ID: key}
+		if polarity, kk := m["polarity"].(float64); kk {
+			child.Polarity = int(polarity)
 		}
+		return &child
 	} else if ch, ok := data.(Child); ok {
 		return &ch
 	}

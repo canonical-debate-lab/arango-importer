@@ -23,6 +23,7 @@ type Claim struct {
 	Note         string    `json:"note"`
 	MultiPremise bool      `json:"mp"`
 	PremiseRule  int       `json:"mprule"`
+	Truth        float32   `json:"truth"`
 }
 
 func (claim Claim) ArangoID() string {
@@ -41,6 +42,7 @@ func NewClaim(node DebateMapNode) Claim {
 		Note:         node.Note,
 		MultiPremise: node.MultiPremise,
 		PremiseRule:  argumentTypeToPremiseRule(node.Current.ArgumentType),
+		Truth:        0.50,
 	}
 }
 
