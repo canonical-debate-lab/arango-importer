@@ -51,10 +51,13 @@ func main() {
 
 	var format int
 	if strings.HasPrefix(string(file), `[{"children":{`) {
+		fmt.Println("---------------------Detected data in NODES format")
 		format = FORMAT_NODES
 	} else if strings.HasPrefix(string(file), `{"general":`) {
+		fmt.Println("---------------------Detected data in GENERAL format")
 		format = FORMAT_GENERAL
 	} else {
+		fmt.Println("---------------------Data is in unknown format")
 		format = FORMAT_UNKNOWN
 	}
 
@@ -106,6 +109,10 @@ func main() {
 	args := make(map[string]Argument)
 	newClaims := []DebateMapNode{}
 	for i, node := range data {
+		if node.ID == "" {
+			node.ID = node.Current.ID
+			data[i] = node
+		}
 		if format == FORMAT_GENERAL {
 			rev := revisions[node.CurrentRevision]
 			node.Current.Title = rev.Title
@@ -120,11 +127,18 @@ func main() {
 			if node.MultiPremise {
 				// In Debate Map, it's the Arguments that are MP
 				// In this graph, it will be an MP Claim instead, which needs to be created
+				if node.ID == "L0Wv33MFQiuWVbWEKcELsA" {
+					fmt.Println("----------------------------L0Wv33MFQiuWVbWEKcELsA is MPClaim")
+				}
 
 				// Replace the new node with claim and arg nodes
 				argNode, claimNode := node.ConvertToMPClaim()
 				data[i] = argNode
 				newClaims = append(newClaims, claimNode)
+				if node.ID == "L0Wv33MFQiuWVbWEKcELsA" {
+					fmt.Println("----------------------------For MPClaim L0Wv33MFQiuWVbWEKcELsA created claimNode", claimNode.ID)
+					fmt.Println("----------------------------For MPClaim L0Wv33MFQiuWVbWEKcELsA created argNode", argNode.ID)
+				}
 
 				claim := NewClaim(claimNode)
 				claims[claim.ID] = claim
@@ -137,6 +151,9 @@ func main() {
 			} else {
 				argument := NewArgument(node)
 				args[argument.ID] = argument
+				if argument.ID == "L0Wv33MFQiuWVbWEKcELsA" {
+					fmt.Println("----------------------------Added L0Wv33MFQiuWVbWEKcELsA to args")
+				}
 				createItem(colArgs, argument)
 			}
 		case NODE_TYPE_CATEGORY, NODE_TYPE_PACKAGE, NODE_TYPE_QUESTION:
@@ -147,6 +164,10 @@ func main() {
 				node.Current.Title.Base = dmm.Name
 			}
 			argNode, claimNode := node.ConvertToClaimAndArg()
+			if node.ID == "L0Wv33MFQiuWVbWEKcELsA" {
+				fmt.Println("----------------------------L0Wv33MFQiuWVbWEKcELsA is a category, package or question")
+				fmt.Println("----------------------------For L0Wv33MFQiuWVbWEKcELsA created claimNode", claimNode.ID)
+			}
 
 			data[i] = claimNode
 
@@ -157,6 +178,10 @@ func main() {
 			if argNode != nil {
 				data[i] = *argNode
 				newClaims = append(newClaims, claimNode)
+				if node.ID == "L0Wv33MFQiuWVbWEKcELsA" {
+					fmt.Println("----------------------------For L0Wv33MFQiuWVbWEKcELsA added claimNodeto newClaims")
+					fmt.Println("----------------------------For L0Wv33MFQiuWVbWEKcELsA created argNode", argNode.ID)
+				}
 
 				argument := NewArgument(*argNode)
 				argument.ClaimID = claim.ID

@@ -146,6 +146,7 @@ func (node DebateMapNode) ConvertToClaimAndArg() (newArg *DebateMapNode, newClai
 }
 
 type Current struct {
+	ID           string   `json:"node"`
 	Title        TitleSet `json:"titles"`
 	ArgumentType int      `json:"argumentType"`
 }

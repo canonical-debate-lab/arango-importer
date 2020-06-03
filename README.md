@@ -45,6 +45,12 @@ go run *.go
 
 This assumes that you just want to import the data that comes with this project, which is a fair-sized graph of two separate debates, one in English on climate change (incomplete), and one in Portuguese regarding a discussion on plans to reform the Brazilian pension fund.
 
+If you'd like to use a different data file, or a different server, you can see the command-line arguments by typing:
+
+```bash
+go run *.go --help
+```
+
 ## Viewing the data
 ArangoDB provides two easy ways to interact with the data. They provide out-of-the-box a command line shell:
 
